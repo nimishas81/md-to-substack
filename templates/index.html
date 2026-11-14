@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Markdown → Substack</title>
+<style>
+  :root {
+    --bg: #0e0e10;
+    --panel: #18181b;
+    --border: #27272a;
+    --text: #e4e4e7;
+    --muted: #a1a1aa;
+    --accent: #f97316;
+    --ok: #22c55e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    padding: 24px 32px;
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+  header p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+  main {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    height: calc(100vh - 73px);
+  }
+  .pane { padding: 20px 24px; overflow: auto; }
+  .pane + .pane { border-left: 1px solid var(--border); }
+  .row { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+  label.file {
+    display: inline-block;
+    padding: 6px 12px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  label.file:hover { border-color: var(--accent); }
+  label.file input { display: none; }
+  input[type="text"] {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 10px;
+    border-radius: 6px;
+    font: inherit;
+    width: 180px;
+  }
+  textarea {
+    width: 100%;
+    height: calc(100% - 100px);
+    min-height: 300px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 12px;
+    border-radius: 6px;
+    font: 13px/1.5 "SF Mono", Menlo, monospace;
+    resize: none;
+  }
+  button {
+    padding: 6px 14px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    cursor: pointer;
+    font: inherit;
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #000; font-weight: 600; }
+  button:hover { border-color: var(--accent); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .status { font-size: 12px; color: var(--muted); margin-left: auto; }
+  .status.ok { color: var(--ok); }
+  .preview {
+    background: #fff;
+    color: #000;
+    padding: 28px 32px;
+    border-radius: 6px;
+    min-height: calc(100% - 60px);
+    font: 16px/1.6 Georgia, serif;
+  }
+  .preview h1, .preview h2, .preview h3 { font-family: -apple-system, sans-serif; }
+  .preview pre { background: #f4f4f5; padding: 12px; border-radius: 4px; overflow: auto; }
+  .preview code { background: #f4f4f5; padding: 1px 4px; border-radius: 3px; }
+  .preview blockquote { border-left: 3px solid #d4d4d8; padding-left: 14px; color: #52525b; margin-left: 0; }
+  .empty { color: var(--muted); font-style: italic; font-family: -apple-system, sans-serif; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Markdown → Substack</h1>
+  <p>Upload or paste markdown. Preview, then copy rich text or download as HTML.</p>
+</header>
+<main>
+  <section class="pane">
+    <div class="row">
+      <label class="file">
+        Upload .md <input type="file" id="file" accept=".md,.markdown,text/markdown,text/plain" />
+      </label>
+      <input type="text" id="filename" placeholder="filename (for download)" />
+      <button id="convert" class="primary">Convert</button>
+    </div>
+    <textarea id="md" placeholder="# Paste your markdown here
+
+or upload a .md file above..."></textarea>
+  </section>
+
+  <section class="pane">
+    <div class="row">
+      <button id="copy" disabled>Copy rich text</button>
+      <button id="download" disabled>Download .html</button>
+      <span id="status" class="status"></span>
+    </div>
+    <div id="preview" class="preview">
+      <p class="empty">Preview appears here after conversion.</p>
+    </div>
+  </section>
+</main>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  let currentHtml = "";
+
+  $("file").addEventListener("change", async (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    $("md").value = await f.text();
+    if (!$("filename").value) {
+      $("filename").value = f.name.replace(/\.(md|markdown|txt)$/i, "");
+    }
+  });
+
+  $("convert").addEventListener("click", async () => {
+    const md = $("md").value.trim();
+    if (!md) { setStatus("nothing to convert", false); return; }
+
+    const fd = new FormData();
+    fd.append("markdown", md);
+
+    setStatus("converting...", false);
+    const res = await fetch("/convert", { method: "POST", body: fd });
+    if (!res.ok) { setStatus("conversion failed", false); return; }
+    const data = await res.json();
+
+    currentHtml = data.html;
+    $("preview").innerHTML = data.html;
+    $("copy").disabled = false;
+    $("download").disabled = false;
+    setStatus(`${data.word_count} words ready`, true);
+  });
+
+  $("copy").addEventListener("click", async () => {
+    if (!currentHtml) return;
+    try {
+      const item = new ClipboardItem({
+        "text/html": new Blob([currentHtml], { type: "text/html" }),
+        "text/plain": new Blob([$("preview").innerText], { type: "text/plain" }),
+      });
+      await navigator.clipboard.write([item]);
+      setStatus("copied — paste into Substack editor", true);
+    } catch (err) {
+      setStatus("copy failed: " + err.message, false);
+    }
+  });
+
+  $("download").addEventListener("click", () => {
+    const md = $("md").value.trim();
+    if (!md) return;
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = "/download";
+    form.innerHTML = `
+      <input name="markdown" />
+      <input name="filename" />
+    `;
+    form.children[0].value = md;
+    form.children[1].value = $("filename").value || "post";
+    document.body.appendChild(form);
+    form.submit();
+    form.remove();
+    setStatus("download started", true);
+  });
+
+  function setStatus(msg, ok) {
+    const s = $("status");
+    s.textContent = msg;
+    s.className = "status" + (ok ? " ok" : "");
+  }
+</script>
+</body>
+</html>
